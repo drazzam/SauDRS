@@ -1,0 +1,435 @@
+'use client';
+
+import { useState, useCallback, useTransition } from 'react';
+import type { PatientInput, PredictionResult, ValidationError, DiabetesGateResult } from '@/lib/types';
+import { predict, validateInputs, hasHardErrors, checkDiabetesGate } from '@/lib/model';
+import { RiskGauge } from '@/components/RiskGauge';
+import { ShapChart } from '@/components/ShapChart';
+import { BANDS } from '@/lib/model/scoring';
+import { PDFDownloadButton } from '@/components/PDFDownloadButton';
+
+// ── Field definitions ────────────────────────────────────
+
+interface FieldDef {
+  key: keyof PatientInput;
+  label: string;
+  unit: string;
+  info: string;  // shown on ? click
+  step?: string;
+  type?: 'number' | 'select';
+  options?: { value: number; label: string }[];
+}
+
+const DEMOGRAPHICS: FieldDef[] = [
+  { key: 'age', label: 'Age', unit: 'years', info: 'Patient age in completed years. Normal adult range: 18\u2013100.' },
+  { key: 'male', label: 'Sex', unit: '', info: 'Biological sex. Males have slightly higher diabetes conversion rates.', type: 'select',
+    options: [{ value: 1, label: 'Male' }, { value: 0, label: 'Female' }] },
+];
+
+const GLYCEMIC: FieldDef[] = [
+  { key: 'hba1c', label: 'HbA1c', unit: '%', info: 'Glycated hemoglobin reflecting 2\u20133 month average glucose. Prediabetes range: 5.7\u20136.4%. Diabetic: \u22656.5%. May be unreliable in hemoglobinopathies.', step: '0.1' },
+  { key: 'fasting_glucose', label: 'Fasting Glucose', unit: 'mmol/L', info: 'Venous plasma glucose after \u22658 hours fasting. Normal: 3.9\u20135.5 mmol/L. Impaired fasting glucose: 5.6\u20136.9 mmol/L. Diabetic: \u22657.0 mmol/L.', step: '0.1' },
+];
+
+const LIPID: FieldDef[] = [
+  { key: 'hdl', label: 'HDL Cholesterol', unit: 'mmol/L', info: 'High-density lipoprotein. Desirable: >1.0 mmol/L (M), >1.3 mmol/L (F). Higher is protective.', step: '0.01' },
+  { key: 'ldl', label: 'LDL Cholesterol', unit: 'mmol/L', info: 'Low-density lipoprotein. Optimal: <2.6 mmol/L. Borderline high: 3.4\u20134.1 mmol/L.', step: '0.01' },
+  { key: 'total_cholesterol', label: 'Total Cholesterol', unit: 'mmol/L', info: 'Total serum cholesterol. Desirable: <5.2 mmol/L. Borderline: 5.2\u20136.2 mmol/L.', step: '0.01' },
+  { key: 'triglyceride', label: 'Triglycerides', unit: 'mmol/L', info: 'Serum triglycerides (fasting preferred). Normal: <1.7 mmol/L. Borderline: 1.7\u20132.2 mmol/L. High: \u22652.3 mmol/L.', step: '0.01' },
+];
+
+const RENAL_HEPATIC: FieldDef[] = [
+  { key: 'creatinine', label: 'Creatinine', unit: '\u00b5mol/L', info: 'Serum creatinine. Normal: 62\u2013106 \u00b5mol/L (M), 44\u201380 \u00b5mol/L (F). Elevated values may indicate renal impairment.' },
+  { key: 'alt', label: 'ALT', unit: 'U/L', info: 'Alanine aminotransferase. Normal: <40 U/L. Elevated ALT is associated with fatty liver and insulin resistance.' },
+  { key: 'hemoglobin', label: 'Hemoglobin', unit: 'g/dL', info: 'Blood hemoglobin. Normal: 13.5\u201317.5 g/dL (M), 12.0\u201315.5 g/dL (F). Low hemoglobin may affect HbA1c reliability. Sickle cell trait prevalence in Saudi Arabia: 4\u20137%.', step: '0.1' },
+];
+
+const BLOOD_PRESSURE: FieldDef[] = [
+  { key: 'systolic_bp', label: 'Systolic BP', unit: 'mmHg', info: 'Office systolic blood pressure. Normal: <120 mmHg. Elevated: 120\u2013129 mmHg. Hypertension Stage 1: 130\u2013139 mmHg.' },
+  { key: 'diastolic_bp', label: 'Diastolic BP', unit: 'mmHg', info: 'Office diastolic blood pressure. Normal: <80 mmHg. Hypertension Stage 1: 80\u201389 mmHg.' },
+];
+
+const COMORBIDITIES: FieldDef[] = [
+  { key: 'dx_hypertension', label: 'Hypertension', unit: '', info: 'Documented hypertension diagnosis. Associated with increased diabetes risk and cardiovascular complications.', type: 'select',
+    options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes' }] },
+  { key: 'dx_dyslipidemia', label: 'Dyslipidemia', unit: '', info: 'Documented dyslipidemia (abnormal lipid levels). Common in prediabetic patients.', type: 'select',
+    options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes' }] },
+  { key: 'dx_obesity', label: 'Obesity', unit: '', info: 'Documented obesity diagnosis (BMI \u226530 kg/m\u00b2). Strong risk factor for diabetes conversion. Saudi prediabetes population mean BMI: 33.8 kg/m\u00b2.', type: 'select',
+    options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes' }] },
+  { key: 'dx_hypothyroidism', label: 'Hypothyroidism', unit: '', info: 'Documented hypothyroidism. Can affect metabolic profile and glucose metabolism.', type: 'select',
+    options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes' }] },
+];
+
+const HISTORICAL: FieldDef[] = [
+  { key: 'hist_hba1c_mean', label: 'Average of Prior HbA1c Values', unit: '%', info: 'The average (mean) of all previously recorded HbA1c measurements from prior clinic visits. If the patient had three prior readings of 5.8%, 5.9%, and 6.0%, enter 5.9%.', step: '0.1' },
+  { key: 'hist_hba1c_max', label: 'Highest Prior HbA1c', unit: '%', info: 'The single highest HbA1c ever recorded for this patient in prior laboratory results. This captures the peak glycemic burden.', step: '0.1' },
+  { key: 'hist_hba1c_ever_diabetic', label: 'Any Prior HbA1c \u22656.5%?', unit: '', info: 'Has the patient ever had a single HbA1c measurement in the diabetic range (\u22656.5%) in their prior records? Even a single episode of diabetic-range HbA1c significantly increases future risk.', type: 'select',
+    options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes' }] },
+  { key: 'hist_fasting_glucose_mean', label: 'Average of Prior Fasting Glucose', unit: 'mmol/L', info: 'The average of all previously recorded fasting glucose values from prior visits.', step: '0.1' },
+  { key: 'hist_fasting_glucose_max', label: 'Highest Prior Fasting Glucose', unit: 'mmol/L', info: 'The single highest fasting glucose ever recorded in prior laboratory results.', step: '0.1' },
+  { key: 'hist_hdl_mean', label: 'Average of Prior HDL', unit: 'mmol/L', info: 'The average of all previously recorded HDL cholesterol values.', step: '0.01' },
+  { key: 'hist_hemoglobin_mean', label: 'Average of Prior Hemoglobin', unit: 'g/dL', info: 'The average of all previously recorded hemoglobin values. Relevant for assessing HbA1c reliability over time.', step: '0.1' },
+];
+
+const FORM_SECTIONS = [
+  { title: 'Demographics', fields: DEMOGRAPHICS },
+  { title: 'Glycemic Markers', fields: GLYCEMIC },
+  { title: 'Lipid Panel', fields: LIPID },
+  { title: 'Renal / Hepatic / Hematology', fields: RENAL_HEPATIC },
+  { title: 'Blood Pressure', fields: BLOOD_PRESSURE },
+  { title: 'Comorbidities', fields: COMORBIDITIES },
+];
+
+// ── Random sample data generator ─────────────────────────
+
+function generateRandomPatient(): PatientInput {
+  const male = Math.random() > 0.5 ? 1 : 0;
+  const age = Math.floor(35 + Math.random() * 40); // 35-75
+  const hba1c = +(5.7 + Math.random() * 0.7).toFixed(1); // 5.7-6.4
+  const fg = +(4.5 + Math.random() * 2.3).toFixed(1); // 4.5-6.8 (below diabetes threshold)
+  const hdl = +(0.8 + Math.random() * 0.8).toFixed(2); // 0.8-1.6
+  const ldl = +(1.8 + Math.random() * 2.5).toFixed(2); // 1.8-4.3
+  const tc = +(hdl + ldl + 0.5 + Math.random() * 1.0).toFixed(2);
+  const tg = +(0.6 + Math.random() * 2.5).toFixed(2); // 0.6-3.1
+  const cr = Math.floor(50 + Math.random() * 80); // 50-130
+  const alt = Math.floor(10 + Math.random() * 60); // 10-70
+  const hgb = +(male === 1 ? 13 + Math.random() * 4 : 11 + Math.random() * 3).toFixed(1);
+  const sbp = Math.floor(110 + Math.random() * 40); // 110-150
+  const dbp = Math.floor(65 + Math.random() * 25); // 65-90
+
+  return {
+    age, male, hba1c, fasting_glucose: fg,
+    hdl, ldl, total_cholesterol: tc, triglyceride: tg,
+    creatinine: cr, alt, hemoglobin: hgb,
+    systolic_bp: sbp, diastolic_bp: Math.min(dbp, sbp - 10),
+    dx_hypertension: Math.random() > 0.7 ? 1 : 0,
+    dx_dyslipidemia: Math.random() > 0.7 ? 1 : 0,
+    dx_obesity: Math.random() > 0.75 ? 1 : 0,
+    dx_hypothyroidism: Math.random() > 0.9 ? 1 : 0,
+  };
+}
+
+// ── Info tooltip component ───────────────────────────────
+
+function InfoTooltip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-block ml-1">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-5 h-5 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold leading-none hover:bg-gray-300 inline-flex items-center justify-center flex-shrink-0"
+      >?</button>
+      {open && (
+        <div className="absolute z-50 bottom-7 left-0 sm:left-0 w-[min(16rem,calc(100vw-3rem))] p-3 rounded-lg shadow-lg border border-gray-200 bg-white text-xs text-gray-700">
+          {text}
+          <button onClick={() => setOpen(false)} className="block mt-2 text-blue-600 text-[10px] min-h-[28px]">Close</button>
+        </div>
+      )}
+    </span>
+  );
+}
+
+// ── Main Page ────────────────────────────────────────────
+
+export default function PredictPage() {
+  const [input, setInput] = useState<PatientInput>({});
+  const [result, setResult] = useState<PredictionResult | null>(null);
+  const [errors, setErrors] = useState<ValidationError[]>([]);
+  const [diabetesGate, setDiabetesGate] = useState<DiabetesGateResult | null>(null);
+  const [diabetesAcknowledged, setDiabetesAcknowledged] = useState(false);
+  const [showHistorical, setShowHistorical] = useState(false);
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  const updateField = useCallback((key: keyof PatientInput, value: string) => {
+    setInput(prev => ({ ...prev, [key]: value === '' ? undefined : Number(value) }));
+  }, []);
+
+  const handlePredict = useCallback(() => {
+    // Step 1: Validate inputs
+    const ve = validateInputs(input);
+    setErrors(ve);
+    if (hasHardErrors(ve)) return;
+
+    // Step 2: Diabetes detection gate (ADA 2025)
+    const gate = checkDiabetesGate(input);
+    setDiabetesGate(gate);
+
+    if (gate?.blocked) return; // Hard block — definite diabetes
+    if (gate?.softBlocked && !diabetesAcknowledged) return; // Soft block — needs acknowledgment
+
+    // Step 3: Run prediction
+    startTransition(() => { setResult(predict(input)); });
+  }, [input, diabetesAcknowledged]);
+
+  const handleClear = useCallback(() => {
+    setInput({}); setResult(null); setErrors([]);
+    setDiabetesGate(null); setDiabetesAcknowledged(false);
+  }, []);
+
+  const handleRandom = useCallback(() => {
+    const data = generateRandomPatient();
+    setInput(data);
+    setResult(null);
+    setErrors([]);
+    setDiabetesGate(null);
+    setDiabetesAcknowledged(false);
+  }, []);
+
+  const renderField = (f: FieldDef) => {
+    const fieldError = errors.find(e => e.field === f.key);
+    const val = input[f.key];
+
+    if (f.type === 'select' && f.options) {
+      return (
+        <div key={f.key} className="flex flex-col">
+          <label className="text-xs font-medium text-gray-600 mb-1">
+            {f.label} <InfoTooltip text={f.info} />
+          </label>
+          <select
+            className="rounded-md border border-gray-300 bg-white px-3 py-2.5 text-base sm:text-sm focus:border-[#1E3A5F] focus:ring-1 focus:ring-[#1E3A5F] outline-none min-h-[44px]"
+            value={val != null ? String(val) : ''}
+            onChange={e => updateField(f.key, e.target.value)}
+          >
+            <option value="">Select...</option>
+            {f.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          {fieldError && <p className={`text-xs mt-1 ${fieldError.severity === 'error' ? 'text-red-600' : 'text-amber-600'}`}>{fieldError.message}</p>}
+        </div>
+      );
+    }
+
+    return (
+      <div key={f.key} className="flex flex-col">
+        <label className="text-xs font-medium text-gray-600 mb-1">
+          {f.label} {f.unit && <span className="text-gray-400">({f.unit})</span>}
+          <InfoTooltip text={f.info} />
+        </label>
+        <input
+          type="number"
+          step={f.step || 'any'}
+          className={`rounded-md border px-3 py-2.5 text-base sm:text-sm bg-white focus:ring-1 outline-none min-h-[44px] ${
+            fieldError?.severity === 'error' ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
+            : fieldError?.severity === 'warning' ? 'border-amber-400 focus:border-amber-500 focus:ring-amber-200'
+            : 'border-gray-300 focus:border-[#1E3A5F] focus:ring-[#1E3A5F]'
+          }`}
+          value={val != null ? String(val) : ''}
+          onChange={e => updateField(f.key, e.target.value)}
+        />
+        {fieldError && <p className={`text-xs mt-1 ${fieldError.severity === 'error' ? 'text-red-600' : 'text-amber-600'}`}>{fieldError.message}</p>}
+      </div>
+    );
+  };
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:py-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-[#1E3A5F]">Risk Calculator</h1>
+          <p className="text-sm text-gray-500 mt-1">Enter patient laboratory values. All computation occurs locally.</p>
+        </div>
+        <button
+          onClick={handleRandom}
+          className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50 transition-colors w-full sm:w-auto min-h-[44px]"
+        >
+          Fill Sample Data
+        </button>
+      </div>
+
+      <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* LEFT: Form */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Optional patient identification */}
+          <div className="rounded-xl border border-gray-200 p-5 bg-white">
+            <h2 className="text-sm font-semibold text-[#1E3A5F] mb-1">Patient Identification (Optional)</h2>
+            <p className="text-[10px] text-gray-400 mb-3">For report purposes only. All data is processed locally in your browser — nothing is transmitted to or stored on any server.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="flex flex-col">
+                <label className="text-xs font-medium text-gray-600 mb-1">
+                  Patient Name
+                </label>
+                <input
+                  type="text"
+                  maxLength={100}
+                  placeholder="e.g., Ahmed M."
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2.5 text-base sm:text-sm focus:border-[#1E3A5F] focus:ring-1 focus:ring-[#1E3A5F] outline-none min-h-[44px]"
+                  value={input.patient_name || ''}
+                  onChange={e => setInput(prev => ({ ...prev, patient_name: e.target.value || undefined }))}
+                />
+              </div>
+              <div className="flex flex-col">
+                <label className="text-xs font-medium text-gray-600 mb-1">
+                  MRN / EHR ID
+                </label>
+                <input
+                  type="text"
+                  maxLength={50}
+                  placeholder="e.g., MRN-123456"
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2.5 text-base sm:text-sm focus:border-[#1E3A5F] focus:ring-1 focus:ring-[#1E3A5F] outline-none min-h-[44px]"
+                  value={input.patient_mrn || ''}
+                  onChange={e => setInput(prev => ({ ...prev, patient_mrn: e.target.value || undefined }))}
+                />
+              </div>
+            </div>
+          </div>
+
+          {FORM_SECTIONS.map(section => (
+            <div key={section.title} className="rounded-xl border border-gray-200 p-4 sm:p-5 bg-white">
+              <h2 className="text-sm font-semibold text-[#1E3A5F] mb-3">{section.title}</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {section.fields.map(renderField)}
+              </div>
+            </div>
+          ))}
+
+          {/* Historical */}
+          <div className="rounded-xl border border-gray-200 p-4 sm:p-5 bg-white">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-[#1E3A5F]">
+                Historical Laboratory Data (Optional)
+              </h2>
+              <button className="text-xs text-blue-600 hover:underline px-2 py-1 min-h-[44px] flex items-center" onClick={() => setShowHistorical(!showHistorical)}>
+                {showHistorical ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {showHistorical && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {HISTORICAL.map(renderField)}
+              </div>
+            )}
+            {!showHistorical && (
+              <p className="text-xs text-gray-400">
+                If prior laboratory records are available, providing historical values improves prediction accuracy.
+              </p>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex flex-col gap-3">
+            <label className="flex items-start gap-3 text-xs sm:text-sm text-gray-600 cursor-pointer py-1">
+              <input type="checkbox" checked={disclaimerAccepted} onChange={e => setDisclaimerAccepted(e.target.checked)} className="mt-0.5 w-4 h-4 flex-shrink-0" />
+              I understand this is a clinical decision support tool. Predictions must be interpreted in the context of the patient&apos;s complete clinical picture.
+            </label>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button onClick={handlePredict} disabled={!disclaimerAccepted || isPending}
+                className="rounded-lg bg-[#1E3A5F] px-6 py-3 text-white font-semibold hover:bg-[#2a4f7a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full sm:w-auto min-h-[44px]">
+                {isPending ? 'Calculating...' : 'Calculate Risk Score'}
+              </button>
+              <button onClick={handleClear}
+                className="rounded-lg border border-gray-300 px-6 py-3 text-gray-600 font-medium hover:bg-gray-50 w-full sm:w-auto min-h-[44px]">
+                Clear All
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT: Results */}
+        <div className="lg:col-span-1">
+          {/* Diabetes detection gate — persists alongside results if soft-block was acknowledged */}
+          {diabetesGate && (!result || diabetesAcknowledged) && (
+            <div className={`rounded-xl border-2 p-5 mb-6 ${diabetesGate.blocked ? 'border-red-500 bg-red-50' : 'border-amber-500 bg-amber-50'}`}>
+              <h3 className={`text-sm font-bold ${diabetesGate.blocked ? 'text-red-800' : 'text-amber-800'}`}>
+                {diabetesGate.title}
+              </h3>
+              <p className="text-xs text-gray-700 mt-2 leading-relaxed">{diabetesGate.message}</p>
+              {diabetesGate.recommendations.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-xs font-semibold text-gray-700">Recommended next steps:</p>
+                  <ul className="text-xs text-gray-600 mt-1 space-y-1 list-disc pl-4">
+                    {diabetesGate.recommendations.map((r, i) => <li key={i}>{r}</li>)}
+                  </ul>
+                </div>
+              )}
+              {diabetesGate.softBlocked && !diabetesGate.blocked && (
+                <div className="mt-4 border-t border-amber-300 pt-3">
+                  <label className="flex items-start gap-3 text-xs text-amber-800 cursor-pointer py-1">
+                    <input
+                      type="checkbox"
+                      checked={diabetesAcknowledged}
+                      onChange={e => setDiabetesAcknowledged(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 flex-shrink-0"
+                    />
+                    I acknowledge this patient may have diabetes and wish to proceed with prediabetes risk estimation.
+                  </label>
+                  {diabetesAcknowledged && (
+                    <button
+                      onClick={handlePredict}
+                      disabled={isPending}
+                      className="mt-2 rounded-lg bg-amber-600 px-4 py-2.5 text-white text-xs font-semibold hover:bg-amber-700 disabled:opacity-50 w-full sm:w-auto min-h-[44px]"
+                    >
+                      {isPending ? 'Calculating...' : 'Proceed with Prediction'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {result ? (
+            <div className="lg:sticky lg:top-20 space-y-6">
+              <div className="rounded-xl border border-gray-200 p-5" style={{ backgroundColor: result.band.bgColor }}>
+                <RiskGauge srs={result.srs} band={result.band} probability={result.probability} ci={result.confidenceInterval} confidenceLevel={result.confidenceLevel} />
+              </div>
+              <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                <h3 className="text-sm font-semibold text-gray-700">Clinical Interpretation</h3>
+                <div className="mt-2 text-xs text-gray-600 space-y-2">
+                  <p><strong>Annual Conversion Rate:</strong> {result.band.annualRate}</p>
+                  <p><strong>NNT (Lifestyle):</strong> {result.band.nntLifestyle}</p>
+                  <p><strong>Recommended Action:</strong> {result.band.action}</p>
+                  <p className="text-gray-400">
+                    Mode: {result.modelTier === 'enhanced' ? 'Enhanced (with historical data)' : 'Standard (current visit only)'}
+                  </p>
+                  <p className="text-gray-400">
+                    Confidence:{' '}
+                    <span className={
+                      result.confidenceLevel === 'high' ? 'text-green-600 font-medium' :
+                      result.confidenceLevel === 'medium' ? 'text-amber-600 font-medium' :
+                      'text-red-600 font-medium'
+                    }>
+                      {result.confidenceLevel === 'high' ? 'High' : result.confidenceLevel === 'medium' ? 'Medium' : 'Low'}
+                    </span>
+                    {' '}(based on data completeness)
+                  </p>
+                </div>
+              </div>
+              {result.confidenceLevel === 'low' && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+                  <p className="text-xs text-amber-800 font-medium">Limited Data</p>
+                  <p className="text-xs text-amber-700 mt-1">This prediction is based on fewer than half of the available features. Provide additional laboratory values for a more reliable estimate.</p>
+                </div>
+              )}
+              <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                <ShapChart shapValues={result.shapValues} groupContributions={result.groupContributions} />
+              </div>
+              <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                <PDFDownloadButton result={result} input={input} />
+              </div>
+              <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Risk Level Reference</h3>
+                <div className="space-y-1">
+                  {([1, 2, 3, 4, 5, 6] as const).map(tier => {
+                    const b = BANDS[tier];
+                    return (
+                      <div key={tier}
+                        className={`flex items-center gap-2 text-xs rounded px-2 py-1 ${result.band.tier === tier ? 'ring-2 ring-offset-1' : ''}`}
+                        style={result.band.tier === tier ? { outlineColor: b.color, boxShadow: `0 0 0 2px ${b.color}33` } : {}}>
+                        <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: b.color }} />
+                        <span className="font-medium w-24">{b.label}</span>
+                        <span className="text-gray-500">{b.annualRate}/yr</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center text-gray-400">
+              <p className="text-sm">Enter patient data and click &ldquo;Calculate Risk Score&rdquo; to see results.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
