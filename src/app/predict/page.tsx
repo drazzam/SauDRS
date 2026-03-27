@@ -577,7 +577,7 @@ export default function PredictPage() {
                       <p>With obesity: <strong>{(withObesityProb * 100).toFixed(1)}%</strong> 2-year risk</p>
                       <p>Without obesity: <strong>{(withoutObesityProb * 100).toFixed(1)}%</strong> 2-year risk</p>
                       <p className="text-indigo-600">
-                        Obesity adds <strong>+{(delta * 100).toFixed(1)} percentage points</strong> to this patient&apos;s predicted risk.
+                        Obesity adds <strong>+{(delta * 100).toFixed(1)} percentage points</strong>{' '}to this patient&apos;s predicted risk.
                       </p>
                     </div>
                     <p className="mt-2 text-[10px] text-indigo-400">
