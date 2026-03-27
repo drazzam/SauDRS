@@ -116,4 +116,4 @@ Department of Family Medicine and Primary Health Care, Prince Sultan Military Me
 
 ## License
 
-This project is proprietary software developed for clinical research purposes. All rights reserved.
+This project is licensed under the [MIT License](LICENSE).
