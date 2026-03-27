@@ -41,7 +41,8 @@ export function PDFDownloadButton({ result, input }: PDFDownloadButtonProps) {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error('PDF generation failed:', err);
-      setError('PDF generation failed. Results are still visible on screen.');
+      const detail = err instanceof Error ? err.message : String(err);
+      setError(`PDF generation failed: ${detail}`);
     } finally {
       setGenerating(false);
     }
