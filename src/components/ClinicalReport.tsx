@@ -65,7 +65,7 @@ function Footer({ reportId }: { reportId: string }) {
   );
 }
 
-function interpretValue(feature: string, value: number): string {
+function interpretValue(feature: string, value: number, male?: number): string {
   const rules: Record<string, (v: number) => string> = {
     hba1c: v => v < 5.7 ? 'Normal' : v < 6.5 ? 'Prediabetic range' : 'Diabetic range',
     fasting_glucose: v => v < 5.6 ? 'Normal' : v < 7.0 ? 'Impaired' : 'Diabetic range',
@@ -73,7 +73,7 @@ function interpretValue(feature: string, value: number): string {
     ldl: v => v < 2.6 ? 'Optimal' : v < 3.4 ? 'Near optimal' : 'Borderline high',
     triglyceride: v => v < 1.7 ? 'Normal' : v < 2.3 ? 'Borderline' : 'High',
     systolic_bp: v => v < 120 ? 'Normal' : v < 130 ? 'Elevated' : 'Hypertensive',
-    hemoglobin: v => v > 12 ? 'Normal' : 'Low',
+    hemoglobin: v => v >= (male === 1 ? 13.0 : 12.0) ? 'Normal' : 'Low',
     alt: v => v < 40 ? 'Normal' : 'Elevated',
     creatinine: v => v < 106 ? 'Normal' : 'Elevated',
   };
@@ -153,7 +153,7 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
             input.triglyceride != null && ['Triglycerides', `${input.triglyceride} mmol/L`, interpretValue('triglyceride', input.triglyceride)],
             input.creatinine != null && ['Creatinine', `${input.creatinine} umol/L`, interpretValue('creatinine', input.creatinine)],
             input.alt != null && ['ALT', `${input.alt} U/L`, interpretValue('alt', input.alt)],
-            input.hemoglobin != null && ['Hemoglobin', `${input.hemoglobin} g/dL`, interpretValue('hemoglobin', input.hemoglobin)],
+            input.hemoglobin != null && ['Hemoglobin', `${input.hemoglobin} g/dL`, interpretValue('hemoglobin', input.hemoglobin, input.male)],
             input.systolic_bp != null && ['Systolic BP', `${input.systolic_bp} mmHg`, interpretValue('systolic_bp', input.systolic_bp)],
             input.diastolic_bp != null && ['Diastolic BP', `${input.diastolic_bp} mmHg`, ''],
             input.dx_hypertension != null && ['Hypertension', input.dx_hypertension === 1 ? 'Yes' : 'No', input.dx_hypertension === 1 ? 'Cardiovascular risk factor' : ''],
@@ -274,7 +274,7 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
                 : result.band.tier === 2 ? 'HbA1c every 6 months'
                 : result.band.tier === 3 ? 'HbA1c every 3 months'
                 : result.band.tier === 4 ? 'HbA1c + fasting glucose every 2-3 months'
-                : result.band.tier === 5 ? 'HbA1c + fasting glucose monthly'
+                : result.band.tier === 5 ? 'Fasting glucose monthly; HbA1c every 3 months'
                 : 'Urgent: HbA1c + fasting glucose + OGTT within 2 weeks',
               'ADA 2025 Sec. 3',
             ],
@@ -388,7 +388,7 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
           {topRisk.map((sv, i) => (
             <Text key={i} style={s.bodySmall}>
               {i + 1}. {sv.displayName}: {typeof sv.value === 'number' ? sv.value.toFixed(1) : sv.value}
-              {sv.feature && (() => { const interp = interpretValue(sv.feature, sv.value); return interp ? ` (${interp})` : ''; })()}
+              {sv.feature && (() => { const interp = interpretValue(sv.feature, sv.value, input.male); return interp ? ` (${interp})` : ''; })()}
             </Text>
           ))}
         </View>
@@ -410,7 +410,7 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
           {result.band.tier === 2 && 'Biannual HbA1c monitoring (every 6 months). Structured lifestyle program referral.'}
           {result.band.tier === 3 && 'Quarterly HbA1c monitoring (every 3 months). Intensive lifestyle program. Consider metformin per ADA 2025 criteria (age 25-59, BMI >=35, FPG >=110 mg/dL, or HbA1c >=6.0%).'}
           {result.band.tier === 4 && 'Bimonthly monitoring (every 2-3 months). HbA1c + fasting glucose. Metformin evaluation. Ophthalmology/nephrology screening.'}
-          {result.band.tier === 5 && 'Monthly monitoring with HbA1c + fasting glucose. Metformin initiation. Endocrinology referral. OGTT to exclude diabetes.'}
+          {result.band.tier === 5 && 'Monthly fasting glucose monitoring. HbA1c every 3 months. Metformin initiation. Endocrinology referral. OGTT to exclude diabetes.'}
           {result.band.tier >= 6 && 'Urgent specialist referral within 2 weeks. Metformin + intensive lifestyle. OGTT/CGM to rule out diabetes. Full complication screening.'}
         </Text>
 

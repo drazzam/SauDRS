@@ -98,7 +98,7 @@ const BANDS: Record<RiskTier, RiskBand> = {
     color: '#DC2626',
     bgColor: '#FEF2F2',
     annualRate: '19.5 – 29.3%',
-    action: 'Monthly monitoring; metformin initiation; specialist referral; OGTT to exclude diabetes',
+    action: 'Monthly FPG + quarterly HbA1c; metformin initiation; specialist referral; OGTT to exclude diabetes',
     nntLifestyle: '3 – 4',
   },
   6: {

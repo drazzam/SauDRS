@@ -51,6 +51,7 @@ const SUPPRESS_INDIVIDUAL_DISPLAY = new Set([
   'dx_comorbidity_count',     // train-deploy mismatch (15-flag vs 4-flag)
   'dx_hypothyroidism',        // negative coef × negative z = misleading positive contribution
   'dx_dyslipidemia',          // same neg×neg artifact as hypothyroidism (coef -0.010)
+  'diastolic_bp',              // negative coef × below-mean z = misleading positive contribution
 ]);
 
 // Features to zero out during inference due to irreparable train-deploy mismatch.
