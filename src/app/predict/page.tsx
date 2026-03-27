@@ -80,32 +80,94 @@ const FORM_SECTIONS = [
   { title: 'Comorbidities', fields: COMORBIDITIES },
 ];
 
-// ── Random sample data generator ─────────────────────────
+// ── Risk-stratified sample data generators ───────────────
+// Each generator produces clinically plausible patients that
+// fall into the target risk tier based on the model's scoring.
 
-function generateRandomPatient(): PatientInput {
-  const male = Math.random() > 0.5 ? 1 : 0;
-  const age = Math.floor(35 + Math.random() * 40); // 35-75
-  const hba1c = +(5.7 + Math.random() * 0.7).toFixed(1); // 5.7-6.4
-  const fg = +(4.5 + Math.random() * 2.3).toFixed(1); // 4.5-6.8 (below diabetes threshold)
-  const hdl = +(0.8 + Math.random() * 0.8).toFixed(2); // 0.8-1.6
-  const ldl = +(1.8 + Math.random() * 2.5).toFixed(2); // 1.8-4.3
-  const tc = +(hdl + ldl + 0.5 + Math.random() * 1.0).toFixed(2);
-  const tg = +(0.6 + Math.random() * 2.5).toFixed(2); // 0.6-3.1
-  const cr = Math.floor(50 + Math.random() * 80); // 50-130
-  const alt = Math.floor(10 + Math.random() * 60); // 10-70
-  const hgb = +(male === 1 ? 13 + Math.random() * 4 : 11 + Math.random() * 3).toFixed(1);
-  const sbp = Math.floor(110 + Math.random() * 40); // 110-150
-  const dbp = Math.floor(65 + Math.random() * 25); // 65-90
+type RiskProfile = 'low' | 'moderate' | 'high' | 'random';
 
+function generatePatientByRisk(profile: RiskProfile): PatientInput {
+  if (profile === 'random') {
+    // Random across all risk levels
+    const profiles: RiskProfile[] = ['low', 'moderate', 'high'];
+    return generatePatientByRisk(profiles[Math.floor(Math.random() * profiles.length)]);
+  }
+
+  if (profile === 'low') {
+    // Low risk: young, low HbA1c, good lipids, no comorbidities
+    const male = Math.random() > 0.5 ? 1 : 0;
+    const age = Math.floor(30 + Math.random() * 15); // 30-45
+    const hba1c = +(5.7 + Math.random() * 0.2).toFixed(1); // 5.7-5.9
+    const fg = +(4.5 + Math.random() * 0.8).toFixed(1); // 4.5-5.3
+    const hdl = +(1.3 + Math.random() * 0.5).toFixed(2); // 1.3-1.8 (high = good)
+    const tg = +(0.5 + Math.random() * 0.7).toFixed(2); // 0.5-1.2 (low = good)
+    const ldl = +(1.8 + Math.random() * 1.0).toFixed(2); // 1.8-2.8
+    const tc = +(hdl + ldl + tg / 5 + Math.random() * 0.3).toFixed(2);
+    const cr = Math.floor(55 + Math.random() * 30); // 55-85
+    const altv = Math.floor(10 + Math.random() * 20); // 10-30
+    const hgb = +(male === 1 ? 14 + Math.random() * 2 : 12.5 + Math.random() * 1.5).toFixed(1);
+    const sbp = Math.floor(105 + Math.random() * 20); // 105-125
+    const dbp = Math.floor(60 + Math.random() * 15); // 60-75
+    return {
+      age, male, hba1c, fasting_glucose: fg,
+      hdl, ldl, total_cholesterol: tc, triglyceride: tg,
+      creatinine: cr, alt: altv, hemoglobin: hgb,
+      systolic_bp: sbp, diastolic_bp: Math.min(dbp, sbp - 10),
+      dx_hypertension: 0, dx_dyslipidemia: 0, dx_obesity: 0, dx_hypothyroidism: 0,
+    };
+  }
+
+  if (profile === 'moderate') {
+    // Moderate risk: middle-aged, moderate HbA1c, mixed lipids
+    // Calibrated to produce SRS ~45-60 (Tier 3, occasionally Tier 4)
+    const male = Math.random() > 0.5 ? 1 : 0;
+    const age = Math.floor(45 + Math.random() * 15); // 45-60
+    const hba1c = +(5.9 + Math.random() * 0.3).toFixed(1); // 5.9-6.2
+    const fg = +(5.0 + Math.random() * 1.0).toFixed(1); // 5.0-6.0
+    const hdl = +(1.0 + Math.random() * 0.4).toFixed(2); // 1.0-1.4
+    const tg = +(1.0 + Math.random() * 1.0).toFixed(2); // 1.0-2.0
+    const ldl = +(2.2 + Math.random() * 1.2).toFixed(2); // 2.2-3.4
+    const tc = +(hdl + ldl + tg / 5 + Math.random() * 0.4).toFixed(2);
+    const cr = Math.floor(60 + Math.random() * 35); // 60-95
+    const altv = Math.floor(12 + Math.random() * 30); // 12-42
+    const hgb = +(male === 1 ? 13 + Math.random() * 3 : 12 + Math.random() * 2).toFixed(1);
+    const sbp = Math.floor(118 + Math.random() * 22); // 118-140
+    const dbp = Math.floor(68 + Math.random() * 14); // 68-82
+    return {
+      age, male, hba1c, fasting_glucose: fg,
+      hdl, ldl, total_cholesterol: tc, triglyceride: tg,
+      creatinine: cr, alt: altv, hemoglobin: hgb,
+      systolic_bp: sbp, diastolic_bp: Math.min(dbp, sbp - 10),
+      dx_hypertension: Math.random() > 0.65 ? 1 : 0,
+      dx_dyslipidemia: Math.random() > 0.7 ? 1 : 0,
+      dx_obesity: 0, dx_hypothyroidism: 0,
+    };
+  }
+
+  // High risk: older, high HbA1c, poor lipids, comorbidities
+  // Calibrated to produce SRS ~60-80 (Tier 4-5)
+  // Obesity contribution is large (z=7.09 unclipped) so limited to 30% chance
+  // Triglycerides moderated to avoid Tier 6 overshoot
+  const male = Math.random() > 0.4 ? 1 : 0;
+  const age = Math.floor(58 + Math.random() * 15); // 58-73
+  const hba1c = +(6.1 + Math.random() * 0.3).toFixed(1); // 6.1-6.4
+  const fg = +(5.8 + Math.random() * 0.8).toFixed(1); // 5.8-6.6
+  const hdl = +(0.8 + Math.random() * 0.3).toFixed(2); // 0.8-1.1
+  const tg = +(1.5 + Math.random() * 1.0).toFixed(2); // 1.5-2.5
+  const ldl = +(2.5 + Math.random() * 1.5).toFixed(2); // 2.5-4.0
+  const tc = +(hdl + ldl + tg / 5 + Math.random() * 0.4).toFixed(2);
+  const cr = Math.floor(65 + Math.random() * 45); // 65-110
+  const altv = Math.floor(18 + Math.random() * 40); // 18-58
+  const hgb = +(male === 1 ? 13 + Math.random() * 2.5 : 11.5 + Math.random() * 2).toFixed(1);
+  const sbp = Math.floor(130 + Math.random() * 22); // 130-152
+  const dbp = Math.floor(62 + Math.random() * 14); // 62-76
   return {
     age, male, hba1c, fasting_glucose: fg,
     hdl, ldl, total_cholesterol: tc, triglyceride: tg,
-    creatinine: cr, alt, hemoglobin: hgb,
+    creatinine: cr, alt: altv, hemoglobin: hgb,
     systolic_bp: sbp, diastolic_bp: Math.min(dbp, sbp - 10),
-    dx_hypertension: Math.random() > 0.7 ? 1 : 0,
-    dx_dyslipidemia: Math.random() > 0.7 ? 1 : 0,
-    dx_obesity: Math.random() > 0.75 ? 1 : 0,
-    dx_hypothyroidism: Math.random() > 0.9 ? 1 : 0,
+    dx_hypertension: 1, dx_dyslipidemia: Math.random() > 0.4 ? 1 : 0,
+    dx_obesity: Math.random() > 0.7 ? 1 : 0, dx_hypothyroidism: 0,
   };
 }
 
@@ -168,8 +230,8 @@ export default function PredictPage() {
     setDiabetesGate(null); setDiabetesAcknowledged(false);
   }, []);
 
-  const handleRandom = useCallback(() => {
-    const data = generateRandomPatient();
+  const handleFillSample = useCallback((profile: RiskProfile) => {
+    const data = generatePatientByRisk(profile);
     setInput(data);
     setResult(null);
     setErrors([]);
@@ -229,12 +291,24 @@ export default function PredictPage() {
           <h1 className="text-xl sm:text-2xl font-bold text-[#1E3A5F]">Risk Calculator</h1>
           <p className="text-sm text-gray-500 mt-1">Enter patient laboratory values. All computation occurs locally.</p>
         </div>
-        <button
-          onClick={handleRandom}
-          className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50 transition-colors w-full sm:w-auto min-h-[44px]"
-        >
-          Fill Sample Data
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => handleFillSample('low')}
+            className="rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors min-h-[44px]">
+            Sample: Low Risk
+          </button>
+          <button onClick={() => handleFillSample('moderate')}
+            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors min-h-[44px]">
+            Sample: Moderate
+          </button>
+          <button onClick={() => handleFillSample('high')}
+            className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors min-h-[44px]">
+            Sample: High Risk
+          </button>
+          <button onClick={() => handleFillSample('random')}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors min-h-[44px]">
+            Random
+          </button>
+        </div>
       </div>
 
       <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
