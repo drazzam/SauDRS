@@ -146,6 +146,10 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
             input.hemoglobin != null && ['Hemoglobin', `${input.hemoglobin} g/dL`, interpretValue('hemoglobin', input.hemoglobin)],
             input.systolic_bp != null && ['Systolic BP', `${input.systolic_bp} mmHg`, interpretValue('systolic_bp', input.systolic_bp)],
             input.diastolic_bp != null && ['Diastolic BP', `${input.diastolic_bp} mmHg`, ''],
+            input.dx_hypertension != null && ['Hypertension', input.dx_hypertension === 1 ? 'Yes' : 'No', input.dx_hypertension === 1 ? 'Cardiovascular risk factor' : ''],
+            input.dx_dyslipidemia != null && ['Dyslipidemia', input.dx_dyslipidemia === 1 ? 'Yes' : 'No', input.dx_dyslipidemia === 1 ? 'Metabolic risk factor' : ''],
+            input.dx_obesity != null && ['Obesity', input.dx_obesity === 1 ? 'Yes' : 'No', input.dx_obesity === 1 ? 'Strong risk factor for conversion' : ''],
+            input.dx_hypothyroidism != null && ['Hypothyroidism', input.dx_hypothyroidism === 1 ? 'Yes' : 'No', input.dx_hypothyroidism === 1 ? 'Under endocrine follow-up' : ''],
           ].filter(Boolean).map((row, i) => {
             const [label, val, interp] = row as [string, string, string];
             return (

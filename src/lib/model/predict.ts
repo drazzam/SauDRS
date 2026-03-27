@@ -49,6 +49,7 @@ const SUPPRESS_INDIVIDUAL_DISPLAY = new Set([
   'tg_hdl_ratio',             // collinear with triglyceride/hdl
   'tyg_index',                // collinear with triglyceride/fasting_glucose
   'dx_comorbidity_count',     // train-deploy mismatch (15-flag vs 4-flag)
+  'dx_hypothyroidism',        // negative coef × negative z = misleading positive contribution
 ]);
 
 // Features to zero out during inference due to irreparable train-deploy mismatch.
