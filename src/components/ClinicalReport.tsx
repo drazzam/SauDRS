@@ -109,10 +109,10 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
         <Footer reportId={reportId} />
 
         {/* Centered title */}
-        <Text style={s.sectionTitle}>Clinical Risk Assessment Report</Text>
+        <Text style={[s.sectionTitle, { marginTop: 10, marginBottom: 4 }]}>Clinical Risk Assessment Report</Text>
 
         {/* Report info with optional patient name */}
-        <View style={{ marginBottom: 8 }}>
+        <View style={{ marginBottom: 4 }}>
           <Text style={s.bodySmall}>Report Date: {dateStr}  |  Report ID: {reportId}</Text>
           {(input.patient_name || input.patient_mrn) && (
             <Text style={[s.body, { marginTop: 4 }]}>
@@ -124,20 +124,20 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
           )}
         </View>
 
-        <Text style={s.sectionTitleLeft}>1. SauDRS Risk Score</Text>
-        <View style={[s.scoreBox, { backgroundColor: result.band.color }]}>
-          <Text style={s.scoreNumber}>{result.srs}</Text>
-          <Text style={s.scoreLabel}>{result.band.label}</Text>
+        <Text style={[s.sectionTitleLeft, { marginTop: 10, marginBottom: 4 }]}>1. SauDRS Risk Score</Text>
+        <View style={[s.scoreBox, { backgroundColor: result.band.color, marginVertical: 6, padding: 10 }]}>
+          <Text style={[s.scoreNumber, { fontSize: 32 }]}>{result.srs}</Text>
+          <Text style={[s.scoreLabel, { marginTop: 2 }]}>{result.band.label}</Text>
           <Text style={s.scoreSub}>
             2-Year Conversion Probability: {(result.probability * 100).toFixed(1)}%
             {'  '}| Estimate Reliability: {result.confidenceLevel === 'high' ? 'High' : result.confidenceLevel === 'medium' ? 'Moderate' : 'Low'}
           </Text>
         </View>
 
-        <Text style={s.sectionTitleLeft}>2. Patient Clinical Summary</Text>
+        <Text style={[s.sectionTitleLeft, { marginTop: 10, marginBottom: 3 }]}>2. Patient Clinical Summary</Text>
         {/* Patient summary table */}
         <View style={s.table}>
-          <View style={s.tableHeader}>
+          <View style={[s.tableHeader, { paddingVertical: 3 }]}>
             <Text style={[s.tableHeaderCell, { width: 130 }]}>Parameter</Text>
             <Text style={[s.tableHeaderCell, { width: 100 }]}>Value</Text>
             <Text style={[s.tableHeaderCell, { flex: 1 }]}>Interpretation</Text>
@@ -164,7 +164,7 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
           ].filter(Boolean).map((row, i) => {
             const [label, val, interp] = row as [string, string, string];
             return (
-              <View key={label} style={[s.tableRow, i % 2 === 1 ? s.tableRowAlt : {}]}>
+              <View key={label} style={[s.tableRow, { paddingVertical: 2 }, i % 2 === 1 ? s.tableRowAlt : {}]}>
                 <Text style={[s.tableCell, { width: 130 }]}>{label}</Text>
                 <Text style={[s.tableCell, { width: 100 }]}>{val}</Text>
                 <Text style={[s.tableCell, { flex: 1, color: '#6B7280', fontStyle: 'italic' }]}>{interp}</Text>
@@ -174,14 +174,14 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
         </View>
 
         <View wrap={false}>
-        <Text style={s.sectionTitleLeft}>3. Risk Classification</Text>
-        <Text style={s.body}>
+        <Text style={[s.sectionTitleLeft, { marginTop: 8, marginBottom: 2 }]}>3. Risk Classification</Text>
+        <Text style={[s.body, { marginBottom: 2 }]}>
           The patient falls in the <Text style={s.bold}>{result.band.label}</Text> category
           (SRS {result.srs}, annual conversion rate {result.band.annualRate}).
         </Text>
         {/* Band table */}
         <View style={s.table}>
-          <View style={s.tableHeader}>
+          <View style={[s.tableHeader, { paddingVertical: 3 }]}>
             <Text style={[s.tableHeaderCell, { width: 70 }]}>Level</Text>
             <Text style={[s.tableHeaderCell, { width: 55 }]}>Score</Text>
             <Text style={[s.tableHeaderCell, { width: 60 }]}>2-Yr Risk</Text>
@@ -195,7 +195,7 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
             { tier: 5, label: 'Very High', range: '72-83', prob: '35-50%', rate: '19.5-29.3%', color: '#DC2626' },
             { tier: 6, label: 'Critical', range: '84-100', prob: '> 50%', rate: '> 29.3%', color: '#7F1D1D' },
           ].map((b, i) => (
-            <View key={b.tier} style={[s.tableRow, i % 2 === 1 ? s.tableRowAlt : {}, result.band.tier === b.tier ? { backgroundColor: b.color + '22', borderLeftWidth: 2, borderLeftColor: b.color } : {}]}>
+            <View key={b.tier} style={[s.tableRow, { paddingVertical: 2 }, i % 2 === 1 ? s.tableRowAlt : {}, result.band.tier === b.tier ? { backgroundColor: b.color + '22', borderLeftWidth: 2, borderLeftColor: b.color } : {}]}>
               <Text style={[s.tableCell, { width: 70, fontFamily: result.band.tier === b.tier ? 'Helvetica-Bold' : 'Helvetica' }]}>{b.label}</Text>
               <Text style={[s.tableCell, { width: 55 }]}>{b.range}</Text>
               <Text style={[s.tableCell, { width: 60 }]}>{b.prob}</Text>
