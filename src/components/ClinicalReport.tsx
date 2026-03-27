@@ -173,6 +173,7 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
           })}
         </View>
 
+        <View wrap={false}>
         <Text style={s.sectionTitleLeft}>3. Risk Classification</Text>
         <Text style={s.body}>
           The patient falls in the <Text style={s.bold}>{result.band.label}</Text> category
@@ -201,6 +202,7 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
               <Text style={[s.tableCell, { width: 70 }]}>{b.rate}</Text>
             </View>
           ))}
+        </View>
         </View>
       </Page>
 
