@@ -30,6 +30,7 @@ const FIELD_SPECS: Record<string, FieldSpec> = {
   hemoglobin:        { label: 'Hemoglobin', unit: 'g/dL', hardMin: 4.0, hardMax: 22.0, softMin: 8.0, softMax: 19.0 },
   systolic_bp:       { label: 'Systolic BP', unit: 'mmHg', hardMin: 60, hardMax: 250, softMin: 80, softMax: 200 },
   diastolic_bp:      { label: 'Diastolic BP', unit: 'mmHg', hardMin: 30, hardMax: 150, softMin: 40, softMax: 120 },
+  bmi:               { label: 'BMI', unit: 'kg/m²', hardMin: 10, hardMax: 80, softMin: 15, softMax: 60 },
 };
 
 /**

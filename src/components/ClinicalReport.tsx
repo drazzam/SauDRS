@@ -3,7 +3,8 @@
 import {
   Document, Page, Text, View, Image, StyleSheet,
 } from '@react-pdf/renderer';
-import type { PredictionResult, PatientInput, ShapValue } from '@/lib/types';
+import type { PredictionResult, PatientInput } from '@/lib/types';
+import { predict } from '@/lib/model';
 
 const navy = '#1E3A5F';
 const gray = '#4B5563';
@@ -80,6 +81,15 @@ function interpretValue(feature: string, value: number): string {
   return fn ? fn(value) : '';
 }
 
+function classifyBmi(bmi: number): string {
+  if (bmi < 18.5) return 'Underweight';
+  if (bmi < 25) return 'Normal weight';
+  if (bmi < 30) return 'Overweight';
+  if (bmi < 35) return 'Class I Obesity (WHO)';
+  if (bmi < 40) return 'Class II Obesity (WHO)';
+  return 'Class III Obesity (WHO)';
+}
+
 interface ClinicalReportProps {
   result: PredictionResult;
   input: PatientInput;
@@ -148,6 +158,7 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
             input.diastolic_bp != null && ['Diastolic BP', `${input.diastolic_bp} mmHg`, ''],
             input.dx_hypertension != null && ['Hypertension', input.dx_hypertension === 1 ? 'Yes' : 'No', input.dx_hypertension === 1 ? 'Cardiovascular risk factor' : ''],
             input.dx_dyslipidemia != null && ['Dyslipidemia', input.dx_dyslipidemia === 1 ? 'Yes' : 'No', input.dx_dyslipidemia === 1 ? 'Metabolic risk factor' : ''],
+            input.bmi != null && ['BMI', `${input.bmi.toFixed(1)} kg/m\u00B2`, classifyBmi(input.bmi)],
             input.dx_obesity != null && ['Obesity', input.dx_obesity === 1 ? 'Yes' : 'No', input.dx_obesity === 1 ? 'Strong risk factor for conversion' : ''],
             input.dx_hypothyroidism != null && ['Hypothyroidism', input.dx_hypothyroidism === 1 ? 'Yes' : 'No', input.dx_hypothyroidism === 1 ? 'Under endocrine follow-up' : ''],
           ].filter(Boolean).map((row, i) => {
@@ -277,8 +288,15 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
             [
               'Metformin',
               result.band.tier <= 2 ? 'Not indicated at current risk level'
-                : result.band.tier === 3 ? 'Consider if age 25-59 with BMI >= 35 kg/m2, FPG >= 6.1 mmol/L, or HbA1c >= 6.0%'
-                : 'Evaluate for initiation per ADA Recommendation 3.7; discuss benefits (31% RRR) and side effects with patient',
+                : result.band.tier === 3
+                  ? ('Consider if age 25-59 with BMI >= 35 kg/m2, FPG >= 6.1 mmol/L, or HbA1c >= 6.0%.'
+                    + (input.bmi != null
+                      ? ` Patient BMI: ${input.bmi.toFixed(1)} kg/m\u00B2 \u2014 ${input.bmi >= 35 ? 'meets' : 'below'} the BMI >= 35 threshold for strongest metformin evidence.`
+                      : ''))
+                : ('Evaluate for initiation per ADA Recommendation 3.7; discuss benefits (31% RRR) and side effects with patient.'
+                    + (input.bmi != null
+                      ? ` Patient BMI: ${input.bmi.toFixed(1)} kg/m\u00B2 (${classifyBmi(input.bmi)}) \u2014 ${input.bmi >= 35 ? 'meets' : 'below'} BMI >= 35 threshold.`
+                      : '')),
               'ADA 2025 Rec. 3.7',
             ],
             [
@@ -395,6 +413,35 @@ export function ClinicalReport({ result, input }: ClinicalReportProps) {
           {result.band.tier === 5 && 'Monthly monitoring with HbA1c + fasting glucose. Metformin initiation. Endocrinology referral. OGTT to exclude diabetes.'}
           {result.band.tier >= 6 && 'Urgent specialist referral within 2 weeks. Metformin + intensive lifestyle. OGTT/CGM to rule out diabetes. Full complication screening.'}
         </Text>
+
+        {/* Obesity Counterfactual Analysis */}
+        {(() => {
+          const currentObesity = input.dx_obesity === 1 ? 1 : 0;
+          const flippedInput = { ...input, dx_obesity: currentObesity === 1 ? 0 : 1 };
+          const flippedResult = predict(flippedInput);
+          const withObesityProb = currentObesity === 1 ? result.probability : flippedResult.probability;
+          const withoutObesityProb = currentObesity === 1 ? flippedResult.probability : result.probability;
+          const delta = withObesityProb - withoutObesityProb;
+          return (
+            <View style={{ marginTop: 10, padding: 8, backgroundColor: '#EEF2FF', borderRadius: 4, borderWidth: 0.5, borderColor: '#A5B4FC' }}>
+              <Text style={[s.bodySmall, { fontFamily: 'Helvetica-Bold', color: '#3730A3' }]}>Obesity Impact (Counterfactual Analysis)</Text>
+              <Text style={[s.bodySmall, { marginTop: 3 }]}>
+                With obesity: {(withObesityProb * 100).toFixed(1)}% 2-year risk  |  Without obesity: {(withoutObesityProb * 100).toFixed(1)}% 2-year risk
+              </Text>
+              <Text style={[s.bodySmall, { color: '#4338CA' }]}>
+                Obesity adds +{(delta * 100).toFixed(1)} percentage points to this patient's predicted risk (all other inputs held constant).
+              </Text>
+              {input.bmi != null && (
+                <Text style={[s.bodySmall, { marginTop: 2 }]}>
+                  Patient BMI: {input.bmi.toFixed(1)} kg/m{'\u00B2'} ({classifyBmi(input.bmi)})
+                  {input.bmi >= 35 ? ' \u2014 meets ADA Rec. 3.7 BMI >=35 threshold for metformin'
+                    : input.bmi >= 30 ? ' \u2014 below BMI >=35 threshold for strongest metformin evidence'
+                    : ''}
+                </Text>
+              )}
+            </View>
+          );
+        })()}
 
         <View style={s.disclaimer}>
           <Text style={s.disclaimerText}>

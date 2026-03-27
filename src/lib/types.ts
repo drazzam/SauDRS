@@ -29,6 +29,9 @@ export interface PatientInput {
   systolic_bp?: number;
   diastolic_bp?: number;
 
+  // Anthropometrics (display-only — NOT a model feature)
+  bmi?: number;
+
   // Comorbidities
   dx_hypertension?: number;
   dx_dyslipidemia?: number;

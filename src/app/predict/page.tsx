@@ -54,11 +54,23 @@ const COMORBIDITIES: FieldDef[] = [
     options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes' }] },
   { key: 'dx_dyslipidemia', label: 'Dyslipidemia', unit: '', info: 'Documented dyslipidemia (abnormal lipid levels). Common in prediabetic patients.', type: 'select',
     options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes' }] },
-  { key: 'dx_obesity', label: 'Obesity', unit: '', info: 'Documented obesity diagnosis (BMI \u226530 kg/m\u00b2). Strong risk factor for diabetes conversion. Saudi prediabetes population mean BMI: 33.8 kg/m\u00b2.', type: 'select',
+  { key: 'bmi', label: 'BMI', unit: 'kg/m\u00b2', info: 'Body Mass Index. If provided, obesity status is auto-set (BMI \u226530 = Yes). WHO classes: 25\u201329.9 Overweight, 30\u201334.9 Class I Obesity, 35\u201339.9 Class II, \u226540 Class III. ADA Rec. 3.7: strongest metformin evidence at BMI \u226535.', step: '0.1' },
+  { key: 'dx_obesity', label: 'Obesity', unit: '', info: 'Documented obesity diagnosis (BMI \u226530 kg/m\u00b2). Auto-set when BMI is provided. Strong risk factor for diabetes conversion. Saudi prediabetes population mean BMI: 33.8 kg/m\u00b2.', type: 'select',
     options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes' }] },
   { key: 'dx_hypothyroidism', label: 'Hypothyroidism', unit: '', info: 'Documented hypothyroidism. Can affect metabolic profile and glucose metabolism.', type: 'select',
     options: [{ value: 0, label: 'No' }, { value: 1, label: 'Yes' }] },
 ];
+
+// ── BMI classification helper ────────────────────────────
+
+function getBmiClass(bmi: number): { label: string; color: string } {
+  if (bmi < 18.5) return { label: 'Underweight', color: 'text-blue-600' };
+  if (bmi < 25) return { label: 'Normal weight', color: 'text-green-600' };
+  if (bmi < 30) return { label: 'Overweight', color: 'text-amber-600' };
+  if (bmi < 35) return { label: 'Class I Obesity', color: 'text-orange-600' };
+  if (bmi < 40) return { label: 'Class II Obesity', color: 'text-red-600' };
+  return { label: 'Class III Obesity', color: 'text-red-800' };
+}
 
 const HISTORICAL: FieldDef[] = [
   { key: 'hist_hba1c_mean', label: 'Average of Prior HbA1c Values', unit: '%', info: 'The average (mean) of all previously recorded HbA1c measurements from prior clinic visits. If the patient had three prior readings of 5.8%, 5.9%, and 6.0%, enter 5.9%.', step: '0.1' },
@@ -205,7 +217,18 @@ export default function PredictPage() {
   const [isPending, startTransition] = useTransition();
 
   const updateField = useCallback((key: keyof PatientInput, value: string) => {
-    setInput(prev => ({ ...prev, [key]: value === '' ? undefined : Number(value) }));
+    setInput(prev => {
+      const next = { ...prev, [key]: value === '' ? undefined : Number(value) };
+      // Auto-set dx_obesity when BMI is entered
+      if (key === 'bmi') {
+        if (value === '') {
+          // BMI cleared — don't reset dx_obesity (let clinician keep manual choice)
+        } else {
+          next.dx_obesity = Number(value) >= 30 ? 1 : 0;
+        }
+      }
+      return next;
+    });
   }, []);
 
   const handlePredict = useCallback(() => {
@@ -354,6 +377,33 @@ export default function PredictPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {section.fields.map(renderField)}
               </div>
+              {/* BMI class annotation within Comorbidities section */}
+              {section.title === 'Comorbidities' && input.bmi != null && (
+                <div className="mt-3 rounded-lg bg-gray-50 border border-gray-200 px-4 py-2.5">
+                  <p className="text-xs text-gray-600">
+                    <span className="font-medium">BMI {input.bmi.toFixed(1)} kg/m{'\u00B2'}</span>
+                    {' \u2014 '}
+                    <span className={`font-semibold ${getBmiClass(input.bmi).color}`}>
+                      {getBmiClass(input.bmi).label}
+                    </span>
+                    {input.bmi >= 30 && (
+                      <span className="text-gray-500">
+                        {' '} | Obesity auto-set to Yes
+                      </span>
+                    )}
+                    {input.bmi >= 35 && (
+                      <span className="text-gray-500">
+                        {' '} | Meets ADA Rec. 3.7 BMI {'\u2265'}35 threshold for metformin
+                      </span>
+                    )}
+                    {input.bmi >= 30 && input.bmi < 35 && (
+                      <span className="text-gray-500">
+                        {' '} | Below ADA BMI {'\u2265'}35 threshold for strongest metformin evidence
+                      </span>
+                    )}
+                  </p>
+                </div>
+              )}
             </div>
           ))}
 
@@ -467,6 +517,54 @@ export default function PredictPage() {
                   </p>
                 </div>
               </div>
+              {/* BMI context box — shown when BMI is provided */}
+              {input.bmi != null && (
+                <div className="rounded-xl border border-gray-200 p-5 bg-white">
+                  <h3 className="text-sm font-semibold text-gray-700">BMI Context</h3>
+                  <div className="mt-2 text-xs text-gray-600 space-y-1.5">
+                    <p>
+                      <strong>BMI:</strong> {input.bmi.toFixed(1)} kg/m{'\u00B2'}{' '}
+                      <span className={`font-semibold ${getBmiClass(input.bmi).color}`}>
+                        ({getBmiClass(input.bmi).label})
+                      </span>
+                    </p>
+                    {input.bmi >= 30 && input.bmi < 35 && (
+                      <p className="text-amber-700">
+                        Patient BMI {input.bmi.toFixed(1)} is below the BMI {'\u2265'}35 threshold where metformin shows strongest evidence (ADA Rec. 3.7).
+                      </p>
+                    )}
+                    {input.bmi >= 35 && (
+                      <p className="text-red-700">
+                        Patient BMI {input.bmi.toFixed(1)} meets the ADA Rec. 3.7 BMI {'\u2265'}35 threshold for strongest metformin evidence.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+              {/* Obesity counterfactual — shows what-if for toggling obesity */}
+              {result && (() => {
+                const currentObesity = input.dx_obesity === 1 ? 1 : 0;
+                const flippedInput = { ...input, dx_obesity: currentObesity === 1 ? 0 : 1 };
+                const flippedResult = predict(flippedInput);
+                const withObesityProb = currentObesity === 1 ? result.probability : flippedResult.probability;
+                const withoutObesityProb = currentObesity === 1 ? flippedResult.probability : result.probability;
+                const delta = withObesityProb - withoutObesityProb;
+                return (
+                  <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+                    <p className="text-xs font-semibold text-indigo-800">Obesity Impact (Counterfactual)</p>
+                    <div className="mt-2 text-xs text-indigo-700 space-y-1">
+                      <p>With obesity: <strong>{(withObesityProb * 100).toFixed(1)}%</strong> 2-year risk</p>
+                      <p>Without obesity: <strong>{(withoutObesityProb * 100).toFixed(1)}%</strong> 2-year risk</p>
+                      <p className="text-indigo-600">
+                        Obesity adds <strong>+{(delta * 100).toFixed(1)} percentage points</strong> to this patient&apos;s predicted risk.
+                      </p>
+                    </div>
+                    <p className="mt-2 text-[10px] text-indigo-400">
+                      Counterfactual: all other inputs held constant, only obesity status toggled.
+                    </p>
+                  </div>
+                );
+              })()}
               {result.confidenceLevel === 'low' && (
                 <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
                   <p className="text-xs text-amber-800 font-medium">Limited Data</p>
