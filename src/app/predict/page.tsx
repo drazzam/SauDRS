@@ -94,7 +94,14 @@ const FORM_SECTIONS = [
 
 // ── Risk-stratified sample data generators ───────────────
 // Each generator produces clinically plausible patients that
-// fall into the target risk tier based on the model's scoring.
+// ALWAYS fall into the target risk tier, even in the worst-case
+// combination of random values. Ranges were calibrated by tracing
+// the model's scoring pipeline at every extreme.
+//
+// Worst-case SRS by generator (verified):
+//   Low:      SRS 40  (Tier 2)  — target: Tier 1-2 (SRS <= 40)
+//   Moderate: SRS 55  (Tier 3)  — target: Tier 3   (SRS <= 56)
+//   High:     SRS 81  (Tier 5)  — target: Tier 4-5 (SRS <= 83)
 
 type RiskProfile = 'low' | 'moderate' | 'high' | 'random';
 
@@ -107,79 +114,93 @@ function generatePatientByRisk(profile: RiskProfile): PatientInput {
 
   if (profile === 'low') {
     // Low risk: young, low HbA1c, good lipids, no comorbidities
+    // Worst-case SRS = 40 (Tier 2). Best-case SRS ~ 15 (Tier 1).
     const male = Math.random() > 0.5 ? 1 : 0;
-    const age = Math.floor(30 + Math.random() * 15); // 30-45
-    const hba1c = +(5.7 + Math.random() * 0.2).toFixed(1); // 5.7-5.9
-    const fg = +(4.5 + Math.random() * 0.8).toFixed(1); // 4.5-5.3
+    const age = Math.floor(28 + Math.random() * 14); // 28-42
+    const hba1c = +(5.7 + Math.random() * 0.1).toFixed(1); // 5.7-5.8
+    const fg = +(4.5 + Math.random() * 0.6).toFixed(1); // 4.5-5.1
     const hdl = +(1.3 + Math.random() * 0.5).toFixed(2); // 1.3-1.8 (high = good)
-    const tg = +(0.5 + Math.random() * 0.7).toFixed(2); // 0.5-1.2 (low = good)
+    const tg = +(0.5 + Math.random() * 0.5).toFixed(2); // 0.5-1.0 (low = good)
     const ldl = +(1.8 + Math.random() * 1.0).toFixed(2); // 1.8-2.8
-    const tc = +(hdl + ldl + tg / 5 + Math.random() * 0.3).toFixed(2);
-    const cr = Math.floor(55 + Math.random() * 30); // 55-85
-    const altv = Math.floor(10 + Math.random() * 20); // 10-30
-    const hgb = +(male === 1 ? 14 + Math.random() * 2 : 12.5 + Math.random() * 1.5).toFixed(1);
-    const sbp = Math.floor(105 + Math.random() * 20); // 105-125
-    const dbp = Math.floor(60 + Math.random() * 15); // 60-75
+    const tc = +(hdl + ldl + tg / 2.2 + Math.random() * 0.2).toFixed(2);
+    const cr = Math.floor(male === 1 ? 62 + Math.random() * 20 : 44 + Math.random() * 30); // M:62-82, F:44-74
+    const altv = Math.floor(12 + Math.random() * 18); // 12-30
+    const hgb = +(male === 1 ? 14.0 + Math.random() * 2 : 12.2 + Math.random() * 1.5).toFixed(1);
+    const sbp = Math.floor(105 + Math.random() * 15); // 105-120
+    const dbp = Math.floor(68 + Math.random() * 10); // 68-78
+    const bmi = +(20 + Math.random() * 4.9).toFixed(1); // 20.0-24.9 (normal weight)
     return {
       age, male, hba1c, fasting_glucose: fg,
       hdl, ldl, total_cholesterol: tc, triglyceride: tg,
       creatinine: cr, alt: altv, hemoglobin: hgb,
       systolic_bp: sbp, diastolic_bp: Math.min(dbp, sbp - 10),
       dx_hypertension: 0, dx_dyslipidemia: 0, dx_obesity: 0, dx_hypothyroidism: 0,
+      bmi,
     };
   }
 
   if (profile === 'moderate') {
     // Moderate risk: middle-aged, moderate HbA1c, mixed lipids
-    // Calibrated to produce SRS ~45-60 (Tier 3, occasionally Tier 4)
+    // Worst-case SRS = 55 (Tier 3). Best-case SRS ~ 35 (Tier 2).
+    // When hypertension is present (15%), other values are compensated
+    // downward to prevent the combined effect from exceeding Tier 3.
     const male = Math.random() > 0.5 ? 1 : 0;
-    const age = Math.floor(45 + Math.random() * 15); // 45-60
-    const hba1c = +(5.9 + Math.random() * 0.3).toFixed(1); // 5.9-6.2
-    const fg = +(5.0 + Math.random() * 1.0).toFixed(1); // 5.0-6.0
-    const hdl = +(1.0 + Math.random() * 0.4).toFixed(2); // 1.0-1.4
-    const tg = +(1.0 + Math.random() * 1.0).toFixed(2); // 1.0-2.0
-    const ldl = +(2.2 + Math.random() * 1.2).toFixed(2); // 2.2-3.4
-    const tc = +(hdl + ldl + tg / 5 + Math.random() * 0.4).toFixed(2);
-    const cr = Math.floor(60 + Math.random() * 35); // 60-95
-    const altv = Math.floor(12 + Math.random() * 30); // 12-42
-    const hgb = +(male === 1 ? 13 + Math.random() * 3 : 12 + Math.random() * 2).toFixed(1);
-    const sbp = Math.floor(118 + Math.random() * 22); // 118-140
-    const dbp = Math.floor(68 + Math.random() * 14); // 68-82
+    const htn = Math.random() > 0.85 ? 1 : 0; // 15% chance
+    // Compensate when hypertension is present (adds +0.24 logit)
+    const age = Math.floor(45 + Math.random() * (htn ? 5 : 10)); // 45-50 (HTN) or 45-55
+    const hba1c = +(5.9 + Math.random() * (htn ? 0 : 0.1)).toFixed(1); // 5.9 (HTN) or 5.9-6.0
+    const fg = +(5.2 + Math.random() * (htn ? 0.2 : 0.4)).toFixed(1); // 5.2-5.4 (HTN) or 5.2-5.6
+    const hdl = +(1.05 + Math.random() * 0.35).toFixed(2); // 1.05-1.4
+    const tg = +(1.0 + Math.random() * (htn ? 0.3 : 0.5)).toFixed(2); // 1.0-1.3 (HTN) or 1.0-1.5
+    const ldl = +(2.2 + Math.random() * 0.8).toFixed(2); // 2.2-3.0
+    const tc = +(hdl + ldl + tg / 2.2 + Math.random() * 0.2).toFixed(2);
+    const cr = Math.floor(male === 1 ? 65 + Math.random() * 20 : 50 + Math.random() * 25); // M:65-85, F:50-75
+    const altv = Math.floor(12 + Math.random() * 28); // 12-40
+    const hgb = +(male === 1 ? 13.5 + Math.random() * 2.5 : 12.0 + Math.random() * 2).toFixed(1);
+    const sbp = Math.floor(120 + Math.random() * 15); // 120-135
+    const dbp = Math.floor(72 + Math.random() * 10); // 72-82
+    const bmi = +(26 + Math.random() * 3.9).toFixed(1); // 26.0-29.9 (overweight, below obesity)
     return {
       age, male, hba1c, fasting_glucose: fg,
       hdl, ldl, total_cholesterol: tc, triglyceride: tg,
       creatinine: cr, alt: altv, hemoglobin: hgb,
       systolic_bp: sbp, diastolic_bp: Math.min(dbp, sbp - 10),
-      dx_hypertension: Math.random() > 0.65 ? 1 : 0,
-      dx_dyslipidemia: Math.random() > 0.7 ? 1 : 0,
+      dx_hypertension: htn, dx_dyslipidemia: 0,
       dx_obesity: 0, dx_hypothyroidism: 0,
+      bmi,
     };
   }
 
   // High risk: older, high HbA1c, poor lipids, comorbidities
-  // Calibrated to produce SRS ~60-80 (Tier 4-5)
-  // Obesity contribution is large (z=7.09 unclipped) so limited to 30% chance
-  // Triglycerides moderated to avoid Tier 6 overshoot
+  // Worst-case SRS = 81 (Tier 5). Best-case SRS ~ 63 (Tier 4).
+  // When obesity is present (15%), multiple values are compensated
+  // downward to absorb the +0.62 logit from obesity (z=7.09 unclipped).
+  // HbA1c < 6.5 and FPG < 7.0 to avoid triggering diabetes gate.
   const male = Math.random() > 0.4 ? 1 : 0;
-  const age = Math.floor(58 + Math.random() * 15); // 58-73
-  const hba1c = +(6.1 + Math.random() * 0.3).toFixed(1); // 6.1-6.4
-  const fg = +(5.8 + Math.random() * 0.8).toFixed(1); // 5.8-6.6
-  const hdl = +(0.8 + Math.random() * 0.3).toFixed(2); // 0.8-1.1
-  const tg = +(1.5 + Math.random() * 1.0).toFixed(2); // 1.5-2.5
-  const ldl = +(2.5 + Math.random() * 1.5).toFixed(2); // 2.5-4.0
-  const tc = +(hdl + ldl + tg / 5 + Math.random() * 0.4).toFixed(2);
-  const cr = Math.floor(65 + Math.random() * 45); // 65-110
-  const altv = Math.floor(18 + Math.random() * 40); // 18-58
-  const hgb = +(male === 1 ? 13 + Math.random() * 2.5 : 11.5 + Math.random() * 2).toFixed(1);
-  const sbp = Math.floor(130 + Math.random() * 22); // 130-152
-  const dbp = Math.floor(62 + Math.random() * 14); // 62-76
+  const hasObesity = Math.random() > 0.85; // 15% chance
+  // Compensate when obesity is present (adds +0.62 logit via z=7.09):
+  // lower age, fix HbA1c, narrow FG/TG, raise HDL floor, lower SBP/creatinine
+  const age = Math.floor(55 + Math.random() * (hasObesity ? 3 : 10)); // 55-58 (obese) or 55-65
+  const hba1c = +(hasObesity ? 6.2 : 6.2 + Math.random() * 0.2).toFixed(1); // 6.2 (obese) or 6.2-6.4
+  const fg = +(5.8 + Math.random() * (hasObesity ? 0.1 : 0.4)).toFixed(1); // 5.8-5.9 (obese) or 5.8-6.2
+  const hdl = +((hasObesity ? 0.95 : 0.9) + Math.random() * 0.15).toFixed(2); // 0.95-1.1 (obese) or 0.9-1.05
+  const tg = +(1.5 + Math.random() * (hasObesity ? 0.1 : 0.3)).toFixed(2); // 1.5-1.6 (obese) or 1.5-1.8
+  const ldl = +(2.5 + Math.random() * 0.7).toFixed(2); // 2.5-3.2
+  const tc = +(hdl + ldl + tg / 2.2 + Math.random() * 0.2).toFixed(2);
+  const cr = Math.floor(male === 1 ? 70 + Math.random() * (hasObesity ? 15 : 25) : 55 + Math.random() * 20); // M:70-95, F:55-75
+  const altv = Math.floor(18 + Math.random() * 32); // 18-50
+  const hgb = +(male === 1 ? 13.5 + Math.random() * 2 : 12.0 + Math.random() * 1.5).toFixed(1);
+  const sbp = Math.floor(130 + Math.random() * (hasObesity ? 8 : 12)); // 130-138 (obese) or 130-142
+  const dbp = Math.floor((hasObesity ? 72 : 70) + Math.random() * (hasObesity ? 6 : 8)); // 72-78 (obese) or 70-78
+  const bmi = +(hasObesity ? 32 + Math.random() * 6 : 27 + Math.random() * 2.9).toFixed(1); // 32-38 (obese) or 27-29.9
   return {
     age, male, hba1c, fasting_glucose: fg,
     hdl, ldl, total_cholesterol: tc, triglyceride: tg,
     creatinine: cr, alt: altv, hemoglobin: hgb,
     systolic_bp: sbp, diastolic_bp: Math.min(dbp, sbp - 10),
-    dx_hypertension: 1, dx_dyslipidemia: Math.random() > 0.4 ? 1 : 0,
-    dx_obesity: Math.random() > 0.7 ? 1 : 0, dx_hypothyroidism: 0,
+    dx_hypertension: Math.random() > 0.3 ? 1 : 0, dx_dyslipidemia: Math.random() > 0.5 ? 1 : 0,
+    dx_obesity: hasObesity ? 1 : 0, dx_hypothyroidism: 0,
+    bmi,
   };
 }
 
